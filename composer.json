@@ -4,7 +4,13 @@
     "phpunit/phpunit": "^9.1",
     "phpunit/php-timer": "^3.1"
   },
+  "autoload-dev": {
+    "psr-4": {
+      "Test\\": "tests/"
+    }
+  },
   "scripts": {
-    "test": "phpunit"
+    "test": "phpunit --configuration phpunit.xml.dist",
+    "coverage": "phpunit --coverage-html coverage --configuration phpunit.xml.dist"
   }
 }

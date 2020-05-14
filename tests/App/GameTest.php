@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+namespace Test\App;
+
+use App\Game;
+use App\Pellet;
+use App\Field;
+use App\Pac;
+use App\NoopOrder;
+use App\SwithOrder;
+
 class GameTest extends \PHPUnit\Framework\TestCase
 {
     public function testSimple()

@@ -1,23 +1,32 @@
 <?php
 declare(strict_types=1);
 
+namespace Test\Geometry;
+
+use App\Point;
+use App\Pellet;
+use App\Tile;
+
 class PointTest extends \PHPUnit\Framework\TestCase
 {
     public function testBasic()
     {
-        $point = new Point(1, 2);
+        $point = new Point(2, 3);
 
-        self::assertSame(1, $point->x());
-        self::assertSame(2, $point->y());
+        self::assertSame(2, $point->x());
+        self::assertSame(3, $point->y());
     }
 
     public function testIsSame()
     {
-        $point = new Point(1, 1);
+        $point = new Point(2, 3);
 
-        self::assertTrue($point->isSame(new Point(1, 1)));
+        self::assertTrue($point->isSame(new Point(2, 3)));
         self::assertTrue($point->isSame($point));
         self::assertFalse($point->isSame(new Point(0, 0)));
+
+        $pellet = new Pellet(new Tile(2, 3, Tile::TYPE_FLOOR), 1);
+        self::assertTrue($point->isSame($pellet));
     }
 
     public function dataTestDistance()
@@ -50,10 +59,10 @@ class PointTest extends \PHPUnit\Framework\TestCase
     public function dataTestDirection()
     {
         return [
-            [Point::LEFT, 0, 1],
-            [Point::RIGHT, 2, 1],
             [Point::TOP, 1, 0],
+            [Point::RIGHT, 2, 1],
             [Point::BOTTOM, 1, 2],
+            [Point::LEFT, 0, 1],
             [Point::DIAGONAL, 0, 0],
         ];
     }

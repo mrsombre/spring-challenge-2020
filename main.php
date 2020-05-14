@@ -1,6 +1,14 @@
 <?php
 declare(strict_types=1);
 
+namespace App;
+
+use SplFixedArray;
+use SplDoublyLinkedList;
+use SplObjectStorage;
+use SplQueue;
+use InvalidArgumentException;
+
 function debug($var)
 {
     if (defined('APP_DEBUG') && !APP_DEBUG) {
@@ -11,7 +19,12 @@ function debug($var)
 
 class Helper
 {
-    public static function flatten(iterable $it): Generator
+    /**
+     * Recursive iterator
+     * @param iterable $it
+     * @return \Generator
+     */
+    public static function flatten(iterable $it): \Generator
     {
         foreach ($it as $k => $v) {
             if (is_iterable($v)) {
@@ -23,14 +36,27 @@ class Helper
     }
 }
 
-class Point
+interface Coordinates
+{
+    public function x(): int;
+
+    public function y(): int;
+
+    public function p2d(): array;
+}
+
+interface CoordinatesAware
+{
+    public function pos(): Coordinates;
+}
+
+class Point implements Coordinates
 {
     public const TOP = 0;
     public const RIGHT = 1;
     public const BOTTOM = 2;
     public const LEFT = 3;
-
-    public const DIAGONAL = 0;
+    public const DIAGONAL = 4;
 
     public const DIRECTIONS = [
         self::TOP,
@@ -65,25 +91,31 @@ class Point
         return $this->y;
     }
 
-    public function isSame(Point $point): bool
+    public function p2d(): array
     {
-        return $this->x === $point->x && $this->y === $point->y;
+        return [$this->x, $this->y];
     }
 
-    public function distance(Point $point): int
+    public function isSame(Coordinates $point): bool
     {
-        return abs($this->x - $point->x) + abs($this->y - $point->y);
+        return $this->x === $point->x() && $this->y === $point->y();
     }
 
-    public function direction(Point $point): int
+    public function distance(Coordinates $point): int
     {
-        if ($this->x === $point->x) {
-            if ($this->y > $point->y) {
+        return abs($this->x - $point->x()) + abs($this->y - $point->y());
+    }
+
+    public function direction(Coordinates $point): int
+    {
+        [$px, $py] = $point->p2d();
+        if ($this->x === $px) {
+            if ($this->y > $py) {
                 return self::TOP;
             }
             return self::BOTTOM;
-        } elseif ($this->y === $point->y) {
-            if ($this->x > $point->x) {
+        } elseif ($this->y === $py) {
+            if ($this->x > $px) {
                 return self::LEFT;
             }
             return self::RIGHT;
@@ -121,7 +153,7 @@ class Tile extends Point
     }
 }
 
-class Pellet extends Point
+class Pellet extends Tile
 {
     public const STATUS_EXISTS = 1;
     public const STATUS_EATEN = 0;
@@ -129,9 +161,12 @@ class Pellet extends Point
     private $status = self::STATUS_EXISTS;
     private $cost;
 
-    public function __construct(Point $point, int $cost)
+    public function __construct(Tile $tile, int $cost)
     {
-        parent::__construct($point->x(), $point->y());
+        if ($tile->isWall()) {
+            throw new InvalidArgumentException('Using wall tile for pellet');
+        }
+        parent::__construct($tile->x(), $tile->y(), self::TYPE_FLOOR);
         $this->cost = $cost;
     }
 
@@ -157,57 +192,11 @@ class Pellet extends Point
     }
 }
 
-abstract class AbstractOrder
+class Vector extends SplDoublyLinkedList
 {
-    public const MOVE = 'MOVE';
-    public const POWER_SPEED = 'SPEED';
-    public const POWER_SWITCH = 'SWITCH';
-
-    protected $type;
-    protected $value;
-
-    public function command(): string
-    {
-        $command = $this->type . ' {id}';
-        if ($this->value) {
-            $command .= ' ' . $this->value;
-        }
-        return $command;
-    }
 }
 
-class NoopOrder extends AbstractOrder
-{
-    public function command(): string
-    {
-        throw new \RuntimeException('No command for noop');
-    }
-}
-
-class SwithOrder extends AbstractOrder
-{
-    protected $type = self::POWER_SWITCH;
-
-    public function __construct(string $value)
-    {
-        $this->value = $value;
-    }
-}
-
-class MoveOrder extends AbstractOrder
-{
-    protected $type = self::MOVE;
-    /** @var \Point */
-    private $point;
-
-    public function __construct(Point $point)
-    {
-        $this->point = $point;
-        $this->value = "{$point->x()} {$point->y()}";
-    }
-}
-
-class Pac
+class Pac implements CoordinatesAware
 {
     public const MINE = 1;
     public const ENEMY = 0;
@@ -228,16 +217,16 @@ class Pac
     private $cooldown = 0;
     private $type;
     private $typeBefore;
-    /** @var \Point */
+    /** @var Point */
     private $pos;
-    /** @var \Point */
+    /** @var Point */
     private $posBefore;
     private $seen = 0;
     private $seenBefore = 0;
 
-    /** @var \AbstractOrder */
+    /** @var AbstractOrder */
     public $order;
-    /** @var \AbstractOrder */
+    /** @var AbstractOrder */
     public $orderBefore;
 
     public function __construct(int $id, int $owner, int $tick, Point $pos, string $type, int $speedActive, int $cooldown)
@@ -253,7 +242,7 @@ class Pac
     public function update(int $tick, Point $pos, string $type, int $speedActive, int $cooldown): Pac
     {
         if ($this->seen === $tick) {
-            throw new \InvalidArgumentException('Only one update on one tick');
+            throw new InvalidArgumentException('Only one update on one tick');
         }
         $this->seenBefore = $this->seen;
         $this->seen = $tick;
@@ -281,7 +270,7 @@ class Pac
         return $this->owner === self::ENEMY;
     }
 
-    public function pos(): Point
+    public function pos(): Coordinates
     {
         return $this->pos;
     }
@@ -318,7 +307,7 @@ class Pac
 
     public function isMoving(): bool
     {
-        return $this->pos !== $this->posBefore;
+        return $this->isSeen() && $this->pos !== $this->posBefore;
     }
 
     public function compare(Pac $pac): int
@@ -355,27 +344,27 @@ class Field
     private $width = 0;
     private $height = 0;
 
-    /** @var \SplFixedArray */
+    /** @var SplFixedArray */
     private $tiles;
-    /** @var \SplFixedArray */
+    /** @var SplFixedArray */
     private $cacheDirections;
-    /** @var \SplFixedArray */
+    /** @var SplFixedArray */
     private $cacheVectors;
 
     public static function factory(array $raw): Field
     {
         $h = count($raw);
         if ($h === 0) {
-            throw new \InvalidArgumentException('Zero height field provided');
+            throw new InvalidArgumentException('Zero height field provided');
         }
         $w = strlen($raw[0]);
         if ($w === 0) {
-            throw new \InvalidArgumentException('Zero width field provided');
+            throw new InvalidArgumentException('Zero width field provided');
         }
         $tiles = [];
         for ($y = 0; $y < $h; $y++) {
             if (strlen($raw[$y]) !== $w) {
-                throw new \InvalidArgumentException('Variable width field passed');
+                throw new InvalidArgumentException('Variable width field passed');
             }
             for ($x = 0; $x < $w; $x++) {
                 $tiles[] = Tile::factory($x, $y, $raw[$y][$x]);
@@ -399,11 +388,11 @@ class Field
             }
         }
 
-        /** @var \Tile $tile */
+        /** @var Tile $tile */
         foreach ($tiles as $tile) {
-            if (!$tile instanceof \Tile) {
+            if (!$tile instanceof Tile) {
                 $type = get_class($tile);
-                throw new \InvalidArgumentException("Invalid tile type: {$type}");
+                throw new InvalidArgumentException("Invalid tile type: {$type}");
             }
             $this->tiles[$tile->x()][$tile->y()] = $tile;
         }
@@ -425,7 +414,7 @@ class Field
     public function tile(int $x, int $y): Tile
     {
         if (!isset($this->tiles[$x][$y])) {
-            throw new \InvalidArgumentException("Tile {$x}.{$y} not found");
+            throw new InvalidArgumentException("Tile {$x}.{$y} not found");
         }
         return $this->tiles[$x][$y];
     }
@@ -434,31 +423,40 @@ class Field
     {
         $nx = $point->x() + Point::DISPLACEMENT[$direction][0];
         $ny = $point->y() + Point::DISPLACEMENT[$direction][1];
-        return isset($this->tiles[$nx][$ny]) ? $this->tiles[$nx][$ny] : null;
+
+        if (!$this->tiles->offsetExists($nx)) {
+            return null;
+        }
+        if (!$this->tiles[$nx]->offsetExists($ny)) {
+            return null;
+        }
+        return $this->tiles[$nx][$ny];
     }
 
     /**
-     * @param \Point $point
+     * @param Point $point
      * @return Point[]
      */
     public function adjacent(Point $point): array
     {
-        if (!isset($this->cacheDirections[$point->x()][$point->y()])) {
+        [$x, $y] = $point->p2d();
+        if (!isset($this->cacheDirections[$x][$y])) {
             $result = [];
             foreach (Point::DIRECTIONS as $direction) {
                 if (($tile = $this->nextTile($point, $direction)) && $tile->isFloor()) {
                     $result[$direction] = $tile;
                 }
             }
-            $this->cacheDirections[$point->x()][$point->y()] = $result;
+            $this->cacheDirections[$x][$y] = $result;
         }
-        return $this->cacheDirections[$point->x()][$point->y()];
+        return $this->cacheDirections[$x][$y];
     }
 
-    public function vector(Point $point, int $direction): SplDoublyLinkedList
+    public function vector(Point $point, int $direction): Vector
     {
-        if (!isset($this->cacheVectors[$point->x()][$point->y()][$direction])) {
-            $result = new SplDoublyLinkedList;
+        [$x, $y] = $point->p2d();
+        if (!isset($this->cacheVectors[$x][$y][$direction])) {
+            $result = new Vector;
             $result->setIteratorMode(SplDoublyLinkedList::IT_MODE_KEEP);
             $next = $point;
             while ($next = $this->nextTile($next, $direction)) {
@@ -467,9 +465,9 @@ class Field
                 }
                 $result->push($next);
             }
-            $this->cacheVectors[$point->x()][$point->y()][$direction] = $result;
+            $this->cacheVectors[$x][$y][$direction] = $result;
         }
-        return $this->cacheVectors[$point->x()][$point->y()][$direction];
+        return $this->cacheVectors[$x][$y][$direction];
     }
 
     public function pathsCount(Point $point): int
@@ -492,24 +490,24 @@ class Field
 
 class Game
 {
-    /** @var \Field */
+    /** @var Field */
     private $field;
 
     private $ticks = 0;
     private $myScore = 0;
     private $opponentScore = 0;
 
-    /** @var \Tick */
+    /** @var Tick */
     private $tick;
-    /** @var \Tick */
+    /** @var Tick */
     private $tickBefore;
 
     private $pacs;
     private $pellets;
 
-    /** @var \SplObjectStorage */
+    /** @var SplObjectStorage */
     private $cachePellets;
-    /** @var \SplObjectStorage */
+    /** @var SplObjectStorage */
     private $cacheSupers;
 
     public function __construct(Field $field)
@@ -622,7 +620,7 @@ class Game
 
     public function attachPellets()
     {
-        /** @var \Pellet $pellet */
+        /** @var Pellet $pellet */
         foreach (Helper::flatten($this->tick->visiblePellets()) as $pellet) {
             $this->cachePellets->attach($pellet);
             if ($pellet->isSuper()) {
@@ -634,7 +632,7 @@ class Game
     public function detachPellets()
     {
         $delete = new SplObjectStorage;
-        /** @var \Pellet $pellet */
+        /** @var Pellet $pellet */
         foreach ($this->cachePellets as $pellet) {
             if ($pellet->isEaten()) {
                 $delete->attach($pellet);
@@ -659,7 +657,7 @@ class Game
      */
     public function cleanupPelletsUnderPacs()
     {
-        /** @var \Pac $pac */
+        /** @var Pac $pac */
         foreach (Helper::flatten($this->tick->visiblePacs()) as $pac) {
             if (!$this->isPelletKnown($pac->pos())) {
                 continue;
@@ -673,7 +671,7 @@ class Game
      */
     public function cleanupPelletsIDontSee()
     {
-        /** @var \Pac $pac */
+        /** @var Pac $pac */
         foreach ($this->tick->visiblePacs(Pac::MINE) as $pac) {
             $paths = $this->field->paths($pac->pos());
             foreach (Helper::flatten($paths) as $point) {
@@ -690,7 +688,7 @@ class Game
     public function commands(): array
     {
         $result = [];
-        /** @var \Pac $pac */
+        /** @var Pac $pac */
         foreach ($this->tick->visiblePacs(Pac::MINE) as $pac) {
             if (($order = $pac->order()) && !$order instanceof NoopOrder) {
                 $result[] = str_replace('{id}', $pac->id(), $order->command());
@@ -735,7 +733,7 @@ class Tick
     public function visiblePac(int $im, int $id): Pac
     {
         if (!isset($this->visiblePacs[$im][$id])) {
-            throw new \InvalidArgumentException("Pac {$im}.{$id} not visible");
+            throw new InvalidArgumentException("Pac {$im}.{$id} not visible");
         }
         return $this->visiblePacs[$im][$id];
     }
@@ -763,7 +761,7 @@ class Tick
     public function visiblePellet(Point $point): Pellet
     {
         if (!isset($this->visiblePellets[$point->x()][$point->y()])) {
-            throw new \InvalidArgumentException("Pellet {$point->x()}.{$point->y()} not visible");
+            throw new InvalidArgumentException("Pellet {$point->x()}.{$point->y()} not visible");
         }
         return $this->visiblePellets[$point->x()][$point->y()];
     }
@@ -774,11 +772,61 @@ class Tick
     }
 }
 
+abstract class AbstractOrder
+{
+    public const MOVE = 'MOVE';
+    public const POWER_SPEED = 'SPEED';
+    public const POWER_SWITCH = 'SWITCH';
+
+    protected $type;
+    protected $value;
+
+    public function command(): string
+    {
+        $command = $this->type . ' {id}';
+        if ($this->value) {
+            $command .= ' ' . $this->value;
+        }
+        return $command;
+    }
+}
+
+class NoopOrder extends AbstractOrder
+{
+    public function command(): string
+    {
+        throw new \RuntimeException('No command for noop');
+    }
+}
+
+class SwithOrder extends AbstractOrder
+{
+    protected $type = self::POWER_SWITCH;
+
+    public function __construct(string $value)
+    {
+        $this->value = $value;
+    }
+}
+
+class MoveOrder extends AbstractOrder
+{
+    protected $type = self::MOVE;
+    /** @var Point */
+    private $point;
+
+    public function __construct(Point $point)
+    {
+        $this->point = $point;
+        $this->value = "{$point->x()} {$point->y()}";
+    }
+}
+
 abstract class AbstractStrategy
 {
-    /** @var \SplObjectStorage */
+    /** @var SplObjectStorage */
     protected $pacs;
-    /** @var \Game */
+    /** @var Game */
     protected $game;
 
     public function __construct(SplObjectStorage $pacs, Game $game)
@@ -792,7 +840,7 @@ abstract class AbstractStrategy
     protected function assign(Pac $pac, AbstractOrder $order)
     {
         if ($this->pacs->offsetGet($pac) instanceof AbstractOrder) {
-            throw new \InvalidArgumentException('Trying to assign an order twice a tick');
+            throw new InvalidArgumentException('Trying to assign an order twice a tick');
         }
         $pac->assignOrder($order);
         $this->pacs->offsetSet($pac, $order);
@@ -803,7 +851,7 @@ class NoopStrategy extends AbstractStrategy
 {
     public function exec()
     {
-        /** @var \Pac $pac */
+        /** @var Pac $pac */
         foreach ($this->pacs as $pac) {
             $this->assign($pac, new NoopOrder);
             debug("Pac {$pac->id()} has no orders, assigned noop fallback");
@@ -813,18 +861,18 @@ class NoopStrategy extends AbstractStrategy
 
 class CloseEnemyStrategy extends AbstractStrategy
 {
-    /** @var \SplObjectStorage */
+    /** @var SplObjectStorage */
     public $visibleEnemies;
 
     public function exec()
     {
         $this->visibleEnemies = new SplObjectStorage;
-        /** @var \Pac $pac */
+        /** @var Pac $pac */
         foreach ($this->game->tick()->visiblePacs(Pac::ENEMY) as $pac) {
             $this->visibleEnemies->attach($pac->pos(), $pac);
         }
 
-        /** @var \Pac $pac */
+        /** @var Pac $pac */
         foreach ($this->pacs as $pac) {
             $neighbours = $this->neighbours($pac);
             if (count($neighbours) !== 1) {
@@ -875,9 +923,9 @@ class RushSupersStrategy extends AbstractStrategy
         }
 
         $pairs = [];
-        /** @var \Pellet $pellet */
+        /** @var Pellet $pellet */
         foreach ($supers as $pellet) {
-            /** @var \Pac $pac */
+            /** @var Pac $pac */
             foreach ($this->pacs as $pac) {
                 $pairs[$pac->pos()->distance($pellet)][] = [$pac, $pellet];
             }
@@ -923,7 +971,7 @@ class PriorityVectorStrategy extends AbstractStrategy
 {
     public function exec()
     {
-        /** @var \Pac $pac */
+        /** @var Pac $pac */
         foreach ($this->pacs as $pac) {
             if ($order = $this->react($pac)) {
                 $this->assign($pac, $order);
@@ -946,7 +994,7 @@ class PriorityVectorStrategy extends AbstractStrategy
             return null;
         }
 
-        /** @var \SplDoublyLinkedList $vector */
+        /** @var SplDoublyLinkedList $vector */
         $vector = $paths[$best];
         // stop on cross
         foreach ($vector as $point) {
@@ -965,7 +1013,7 @@ class PriorityVectorStrategy extends AbstractStrategy
     {
         $weight = 0;
         $steps = $vector->count();
-        /** @var \Point $point */
+        /** @var Point $point */
         foreach ($vector as $point) {
             if ($this->game->isPelletKnown($point)) {
                 $pellet = $this->game->pellet($point);
@@ -986,9 +1034,9 @@ class PriorityVectorStrategy extends AbstractStrategy
 
 class Box
 {
-    /** @var \SplObjectStorage */
+    /** @var SplObjectStorage */
     private $pacs;
-    /** @var \AbstractStrategy */
+    /** @var AbstractStrategy[] */
     private $strategies;
 
     public function __construct(Game $game, array $strategies = null)
@@ -1019,17 +1067,17 @@ class Box
 
     public function exec()
     {
-        /** @var \AbstractStrategy $strategy */
+        /** @var AbstractStrategy $strategy */
         foreach ($this->strategies as $strategy) {
             if (!$this->pacs->count()) {
                 return;
             }
             $strategy->exec();
-            $this->detach();
+            $this->detachUsedPacs();
         }
     }
 
-    public function detach()
+    public function detachUsedPacs()
     {
         $delete = new SplObjectStorage;
         foreach ($this->pacs as $pac) {
@@ -1039,99 +1087,9 @@ class Box
         }
         $this->pacs->removeAll($delete);
     }
-
-    public function runToSuper()
-    {
-        if (!count($this->pacs)) {
-            return;
-        }
-
-        // supers
-        /** @var \Floor $pellet */
-        $gold = [];
-        foreach (Helper::flatten($this->pellets) as $pellet) {
-            if ($pellet->isSuper()) {
-                $gold[$pellet->compositeKey()] = $pellet;
-            }
-        }
-        // no more gold?
-        if (!count($gold)) {
-            return;
-        }
-
-        $distances = [];
-        /** @var \Pac $pac */
-        foreach ($this->pacs as $pac) {
-            foreach ($gold as $pellet) {
-                $distances[] = [
-                    'distance' => $pac->pos->distance($pellet),
-                    'pacId' => $pac->id,
-                    'goldId' => $pellet->compositeKey(),
-                ];
-            }
-        }
-        usort($distances, function ($a, $b) {
-            return $a['distance'] <=> $b['distance'];
-        });
-
-        // assign
-        foreach ($distances as $distance) {
-            // assigned
-            if (!isset($this->pacs[$distance['pacId']]) || !isset($gold[$distance['goldId']])) {
-                continue;
-            }
-
-            $order = new Order($gold[$distance['goldId']]);
-            unset($gold[$distance['goldId']]);
-
-            /** @var \Pac $pac */
-            $pac = $this->pacs[$distance['pacId']];
-            $pac->order = $order;
-            unset($this->pacs[$distance['pacId']]);
-
-            if (!count($gold) || !count($this->pacs)) {
-                return;
-            }
-        }
-    }
-
-    public function agressive()
-    {
-        // any enemies?
-        if (!count($this->field->visiblePacs[0])) {
-            return;
-        }
-
-        // react close
-        /** @var \Pac $enemy */
-        foreach ($this->field->visiblePacs[0] as $enemy) {
-            /** @var \Pac $mine */
-            foreach ($this->field->visiblePacs[1] as $mine) {
-                $distance = $mine->pos->distance($enemy->pos);
-                if ($distance > 2) {
-                    continue;
-                }
-
-                // can beat
-                if ($mine->compare($enemy) === 1) {
-                    if (!$mine->cooldown) {
-                        $mine->order = null;
-                        $mine->power = Pac::POWER_SPEED;
-                        break;
-                    }
-
-                    $vector = $this->field->vector($mine->pos, $mine->pos->direction($enemy->pos));
-                    $point = array_pop($vector);
-                    $mine->order = new Order($point->x, $point->y);
-                    debug("{$mine->id} close to {$enemy->id}, agressive!");
-
-                    break;
-                }
-            }
-        }
-    }
 }
 
+// @codeCoverageIgnoreStart
 if (defined('APP_TEST')) {
     return;
 }
@@ -1152,9 +1110,7 @@ unset($w, $h, $raw);
  * Init input variables
  */
 $visiblePacCount = 0;
-$visiblePacs = [];
 $visiblePelletCount = 0;
-$visiblePellets = [];
 
 /**
  * Start game loop
@@ -1162,6 +1118,8 @@ $visiblePellets = [];
 $game = new Game($field);
 
 while (true) {
+    $t = microtime(true);
+
     $score = fscanf(STDIN, "%d %d");
     $game->turn(...$score);
 
@@ -1186,4 +1144,8 @@ while (true) {
 
     $commands = $game->commands();
     echo implode(' | ', $commands) . "\n";
+
+    $tt = number_format(microtime(true) - $t, 5);
+    debug("Tick time {$tt}");
 }
+// @codeCoverageIgnoreEnd

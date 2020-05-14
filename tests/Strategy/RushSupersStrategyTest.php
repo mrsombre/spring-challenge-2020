@@ -1,6 +1,15 @@
 <?php
 declare(strict_types=1);
 
+namespace Test\Strategy;
+
+use App\RushSupersStrategy;
+use App\Field;
+use App\Game;
+use App\Box;
+use App\Pac;
+use App\MoveOrder;
+
 class RushSupersStrategyTest extends \PHPUnit\Framework\TestCase
 {
     public function testMoveToSuper()

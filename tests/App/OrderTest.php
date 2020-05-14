@@ -1,11 +1,19 @@
 <?php
 declare(strict_types=1);
 
+namespace Test\App;
+
+use App\NoopOrder;
+use App\SwithOrder;
+use App\MoveOrder;
+use App\Pac;
+use App\Point;
+
 class OrderTest extends \PHPUnit\Framework\TestCase
 {
     public function testNoop()
     {
-        self::expectException(RuntimeException::class);
+        self::expectException(\RuntimeException::class);
 
         $order = new NoopOrder;
         $order->command();

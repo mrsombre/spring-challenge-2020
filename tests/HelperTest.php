@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+namespace Test;
+
+use App\Helper;
+
 class HelperTest extends \PHPUnit\Framework\TestCase
 {
     public function testIterateFlatten()

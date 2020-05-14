@@ -1,6 +1,14 @@
 <?php
 declare(strict_types=1);
 
+namespace Test\App;
+
+use App\Tick;
+use App\Point;
+use App\Tile;
+use App\Pellet;
+use App\Pac;
+
 class TickTest extends \PHPUnit\Framework\TestCase
 {
     public function testBasic()
@@ -27,7 +35,7 @@ class TickTest extends \PHPUnit\Framework\TestCase
     public function testVisiblePellet()
     {
         $tick = new Tick(1);
-        $pellet = new Pellet(new Point(0, 0), 1);
+        $pellet = new Pellet(new Tile(0, 0, Tile::TYPE_FLOOR), 1);
 
         $tick->appendPellet($pellet);
         self::assertSame($pellet, $tick->visiblePellet($pellet));

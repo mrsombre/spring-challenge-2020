@@ -1,6 +1,12 @@
 <?php
 declare(strict_types=1);
 
+namespace Test\Geometry;
+
+use App\Field;
+use App\Point;
+use App\Tile;
+
 class FieldTest extends \PHPUnit\Framework\TestCase
 {
     public function testBasic()
@@ -54,12 +60,10 @@ class FieldTest extends \PHPUnit\Framework\TestCase
     public function testNextTileEmpty()
     {
         $field = Field::factory([' ']);
-
         $point = $field->tile(0, 0);
+
         self::assertNull($field->nextTile($point, Point::TOP));
-        self::assertNull($field->nextTile($point, Point::RIGHT));
         self::assertNull($field->nextTile($point, Point::BOTTOM));
-        self::assertNull($field->nextTile($point, Point::LEFT));
     }
 
     public function testAdjacent()

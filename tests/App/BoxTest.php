@@ -1,6 +1,14 @@
 <?php
 declare(strict_types=1);
 
+namespace Test\App;
+
+use App\Box;
+use App\Field;
+use App\Pac;
+use App\Game;
+use App\NoopOrder;
+
 class BoxTest extends \PHPUnit\Framework\TestCase
 {
     public function testBasic()

@@ -1,6 +1,16 @@
 <?php
 declare(strict_types=1);
 
+namespace Test\Strategy;
+
+use App\CloseEnemyStrategy;
+use App\Field;
+use App\Game;
+use App\Box;
+use App\Pac;
+use App\NoopOrder;
+use App\SwithOrder;
+
 class CloseEnemyStrategyTest extends \PHPUnit\Framework\TestCase
 {
     public function testWaitIfStronger()

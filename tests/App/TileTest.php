@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+namespace Test\App;
+
+use App\Tile;
+
 class TileTest extends \PHPUnit\Framework\TestCase
 {
     public function testBasic()

@@ -8,4 +8,12 @@
             <directory>./tests</directory>
         </testsuite>
     </testsuites>
+    <filter>
+        <whitelist>
+            <file>main.php</file>
+        </whitelist>
+    </filter>
+    <php>
+        <env name="APP_DEBUG" value="false"/>
+    </php>
 </phpunit>
