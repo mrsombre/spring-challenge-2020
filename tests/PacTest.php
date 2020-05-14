@@ -5,46 +5,77 @@ class PacTest extends \PHPUnit\Framework\TestCase
 {
     public function testBasic()
     {
-        $pac = new Pac(0, true);
+        $point = new Point(2, 3);
+        $pac = new Pac(1, Pac::MINE, 1, $point, Pac::TYPE_ROCK, 2, 3);
 
-        self::assertSame(0, $pac->id);
-        self::assertTrue($pac->isMine);
+        self::assertSame(1, $pac->id());
+        self::assertTrue($pac->isMine());
+        self::assertFalse($pac->isEnemy());
+        self::assertSame($point, $pac->pos());
+        self::assertSame(Pac::TYPE_ROCK, $pac->type());
+        self::assertSame(2, $pac->speedActive());
+        self::assertSame(3, $pac->cooldown());
     }
 
-    public function testIsStuck()
+    public function testObserve()
     {
-        $pac = new Pac(0, true);
+        $pac = new Pac(1, 1, 1, new Point(0, 0), Pac::TYPE_ROCK, 1, 1);
 
-        $position = new Pellet(0, 0);
-        $pac->updatePosition($position);
-        $pac->updatePosition($position);
-        self::assertTrue($pac->isStuck());
+        $point = new Point(2, 3);
+        $pac->update(2, $point, Pac::TYPE_PAPER, 0, 0);
+        self::assertTrue($pac->isSeen());
+        self::assertSame($point, $pac->pos());
+        self::assertTrue($pac->isMoving());
+        self::assertSame(Pac::TYPE_PAPER, $pac->type());
+        self::assertFalse($pac->isFast());
+        self::assertTrue($pac->isPower());
+    }
+
+    public function testIsSeen()
+    {
+        $pac = new Pac(1, 1, 1, new Point(0, 0), Pac::TYPE_ROCK, 1, 1);
+
+        $pac->update(2, new Point(0, 0), Pac::TYPE_ROCK, 0, 0);
+        $pac->update(3, new Point(0, 0), Pac::TYPE_ROCK, 0, 0);
+        self::assertTrue($pac->isSeen());
+
+        $pac->update(10, new Point(0, 0), Pac::TYPE_ROCK, 0, 0);
+        self::assertFalse($pac->isSeen());
     }
 
     public function testIsMoving()
     {
-        $pac = new Pac(0, true);
+        $pac = new Pac(1, 1, 1, new Point(0, 0), Pac::TYPE_ROCK, 1, 1);
 
-        // no orders
-        $position = new Pellet(0, 0);
-        $pac->updatePosition($position);
-        self::assertFalse($pac->isMoving());
-
-        // stuck
-        $position1 = new Pellet(0, 1);
-        $order = new Order($position1);
-        $pac->updateOrder($order);
-        $pac->updatePosition($position);
-        self::assertTrue($pac->isStuck());
-        self::assertFalse($pac->isMoving());
-
-        // on place
-        $pac->updatePosition($position1);
-        self::assertFalse($pac->isStuck());
-        self::assertFalse($pac->isMoving());
-
-        // actually moving
-        $pac->updatePosition($position);
+        $pac->update(2, new Point(0, 0), Pac::TYPE_ROCK, 0, 0);
+        $point = new Point(0, 1);
+        $pac->update(3, $point, Pac::TYPE_ROCK, 0, 0);
         self::assertTrue($pac->isMoving());
+
+        $pac->update(4, $point, Pac::TYPE_ROCK, 0, 0);
+        self::assertFalse($pac->isMoving());
+    }
+
+    public function dataTestCompare()
+    {
+        return [
+            [1, Pac::TYPE_ROCK, Pac::TYPE_SCISSORS],
+            [0, Pac::TYPE_ROCK, Pac::TYPE_ROCK],
+            [-1, Pac::TYPE_ROCK, Pac::TYPE_PAPER],
+        ];
+    }
+
+    /**
+     * @dataProvider dataTestCompare
+     * @param int $expected
+     * @param string $type0
+     * @param string $type1
+     */
+    public function testCompare(int $expected, string $type0, string $type1)
+    {
+        $pac0 = new Pac(0, 1, 1, new Point(0, 0), $type0, 0, 0);
+        $pac1 = new Pac(0, 1, 1, new Point(1, 1), $type1, 0, 0);
+
+        self::assertSame($expected, $pac0->compare($pac1));
     }
 }

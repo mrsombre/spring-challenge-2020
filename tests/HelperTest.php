@@ -13,7 +13,7 @@ class HelperTest extends \PHPUnit\Framework\TestCase
 
         $item = 0;
         $i = 0;
-        foreach (Helper::iterateFlatten($multiArray) as $item) {
+        foreach (Helper::flatten($multiArray) as $item) {
             $i++;
         }
         self::assertSame(9, $i);

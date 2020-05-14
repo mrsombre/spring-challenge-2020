@@ -5,20 +5,26 @@ class PelletTest extends \PHPUnit\Framework\TestCase
 {
     public function testBasic()
     {
-        $pellet = new Pellet(1, 2);
+        $pellet = new Pellet(new Point(1, 2), 1);
 
-        self::assertSame(1, $pellet->x);
-        self::assertSame(2, $pellet->y);
-        self::assertSame(0, $pellet->cost);
+        self::assertSame(1, $pellet->x());
+        self::assertSame(2, $pellet->y());
         self::assertTrue($pellet->isExists());
-        self::assertFalse($pellet->isSuper());
     }
 
-    public function testIsGold()
+    public function testIsSuper()
     {
-        $pellet = new Pellet(1, 2);
-        $pellet->cost = 10;
+        $pellet = new Pellet(new Point(1, 2), 10);
 
         self::assertTrue($pellet->isSuper());
+    }
+
+    public function testEaten()
+    {
+        $pellet = new Pellet(new Point(1, 2), 1);
+        self::assertTrue($pellet->isExists());
+
+        $pellet->eaten();
+        self::assertTrue($pellet->isEaten());
     }
 }
