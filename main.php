@@ -262,6 +262,7 @@ class Pac implements PositionAware, CompositeKey
     public const TYPE_ROCK = 'ROCK';
     public const TYPE_PAPER = 'PAPER';
     public const TYPE_SCISSORS = 'SCISSORS';
+    public const TYPE_DEAD = 'DEAD';
 
     public const RULES = [
         self::TYPE_ROCK => self::TYPE_SCISSORS,
@@ -738,8 +739,12 @@ class Game
         return $this->opponentScore;
     }
 
-    public function processPac(int $id, int $im, int $x, int $y, string $type, int $speedActive, int $cooldown): Pac
+    public function processPac(int $id, int $im, int $x, int $y, string $type, int $speedActive, int $cooldown): ?Pac
     {
+        if ($type === Pac::TYPE_DEAD) {
+            return null;
+        }
+
         $ck = CompositeKeyHelper::ck($im, $id);
         if (!isset($this->pacs[$ck])) {
             $this->pacs[$ck] = new Pac($id, $im, $this->tick->id(), $this->field->tile($x, $y), $type, $speedActive, $cooldown);
@@ -1223,8 +1228,12 @@ class CloseEnemyStrategy extends AbstractStrategy
         foreach ($neighbours as $enemy) {
             $cmp = $mine->compare($enemy);
             if ($cmp === 1) {
-                debug("Pac {$mine->id()} is stronger than {$enemy->id()}, decided to wait");
-                return new NoopOrder;
+                if ($enemy->isPower()) {
+                    debug("Pac {$mine->id()} is stronger than {$enemy->id()}, decided to wait");
+                    return new NoopOrder;
+                }
+                debug("Pac {$mine->id()} is stronger than {$enemy->id()}, decided to attack");
+                return new MoveOrder($enemy->pos());
             }
         }
 

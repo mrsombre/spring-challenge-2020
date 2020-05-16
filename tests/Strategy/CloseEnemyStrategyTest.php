@@ -30,6 +30,22 @@ class CloseEnemyStrategyTest extends \PHPUnit\Framework\TestCase
         self::assertInstanceOf(NoopOrder::class, $mine->order());
     }
 
+    public function testAttackIfStronger()
+    {
+        $game = GameMaker::factory(['#@ #']);
+
+        $mine = $game->pac(Pac::MINE, 0);
+        $game->processPac(0, 0, 2, 0, Pac::RULES[$mine->type()], 0, 10);
+
+        $box = new Box($game, [
+            CloseEnemyStrategy::class,
+        ]);
+        $box->exec();
+
+        self::assertInstanceOf(MoveOrder::class, $mine->order());
+        self::assertSame('MOVE {id} 2 0', $mine->order()->command());
+    }
+
     public function testSwitchIfWeaker()
     {
         $game = GameMaker::factory(['#@ #']);
