@@ -33,3 +33,11 @@ Functional:
 - some SPL magic
 - domain model refactorings
 - strategies
+
+### Ver 4
+
+Strategies:
+- find closest possible pellet
+- speed
+
+League beaten: Bronze

@@ -4,27 +4,22 @@ declare(strict_types=1);
 namespace Test\App;
 
 use App\Box;
-use App\Field;
-use App\Pac;
-use App\Game;
-use App\NoopOrder;
+use App\SpeedOrder;
+use Test\GameMaker;
 
 class BoxTest extends \PHPUnit\Framework\TestCase
 {
     public function testBasic()
     {
-        $field = Field::factory(['  ']);
-        $game = new Game($field);
-        $game->turn(0, 0);
-        $game->processPac(0, 1, 0, 0, Pac::TYPE_ROCK, 0, 0);
-        $game->processPac(1, 1, 0, 0, Pac::TYPE_ROCK, 0, 0);
-        $game->processPac(2, 1, 0, 0, Pac::TYPE_ROCK, 0, 0);
+        $game = GameMaker::factory([
+            '@',
+        ]);
 
         $box = new Box($game);
-        self::assertSame(3, $box->countFreePacs());
+        self::assertSame(1, $box->freeCount());
 
         $box->exec();
-        self::assertSame(0, $box->countFreePacs());
-        self::assertInstanceOf(NoopOrder::class, $game->pac(1, 0)->order());
+        self::assertSame(0, $box->freeCount());
+        self::assertInstanceOf(SpeedOrder::class, $game->pac(1, 0)->order());
     }
 }

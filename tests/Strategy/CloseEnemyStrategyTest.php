@@ -7,44 +7,91 @@ use App\CloseEnemyStrategy;
 use App\Field;
 use App\Game;
 use App\Box;
+use App\MoveOrder;
 use App\Pac;
 use App\NoopOrder;
 use App\SwithOrder;
+use Test\GameMaker;
 
 class CloseEnemyStrategyTest extends \PHPUnit\Framework\TestCase
 {
     public function testWaitIfStronger()
     {
-        $field = Field::factory(['  ']);
-        $game = new Game($field);
-        $game->turn(0, 0);
+        $game = GameMaker::factory(['#@ #']);
 
-        $game->processPac(0, 1, 0, 0, Pac::TYPE_ROCK, 0, 0);
-        $game->processPac(0, 0, 1, 0, Pac::TYPE_SCISSORS, 0, 0);
+        $mine = $game->pac(Pac::MINE, 0);
+        $game->processPac(0, 0, 2, 0, Pac::RULES[$mine->type()], 0, 0);
 
         $box = new Box($game, [
             CloseEnemyStrategy::class,
         ]);
         $box->exec();
 
-        self::assertInstanceOf(NoopOrder::class, $game->pac(1, 0)->order());
+        self::assertInstanceOf(NoopOrder::class, $mine->order());
     }
 
     public function testSwitchIfWeaker()
     {
-        $field = Field::factory(['  ']);
-        $game = new Game($field);
-        $game->turn(0, 0);
+        $game = GameMaker::factory(['#@ #']);
 
-        $game->processPac(0, 1, 0, 0, Pac::TYPE_SCISSORS, 0, 0);
-        $game->processPac(0, 0, 1, 0, Pac::TYPE_ROCK, 0, 0);
+        $mine = $game->pac(Pac::MINE, 0);
+        $game->processPac(0, 0, 2, 0, Pac::stronger($mine->type()), 0, 0);
 
         $box = new Box($game, [
             CloseEnemyStrategy::class,
         ]);
         $box->exec();
 
-        self::assertInstanceOf(SwithOrder::class, $game->pac(1, 0)->order());
-        self::assertSame('SWITCH {id} PAPER', $game->pac(1, 0)->order()->command());
+        self::assertInstanceOf(SwithOrder::class, $mine->order());
+        self::assertSame('SWITCH {id} SCISSORS', $mine->order()->command());
+    }
+
+    public function testSwitchIfSame()
+    {
+        $game = GameMaker::factory(['#@ #']);
+
+        $mine = $game->pac(Pac::MINE, 0);
+        $game->processPac(0, 0, 2, 0, $mine->type(), 0, 0);
+
+        $box = new Box($game, [
+            CloseEnemyStrategy::class,
+        ]);
+        $box->exec();
+
+        self::assertInstanceOf(SwithOrder::class, $mine->order());
+        self::assertSame('SWITCH {id} PAPER', $mine->order()->command());
+    }
+
+    public function testRunIfWeaker()
+    {
+        $game = GameMaker::factory(['# @  #']);
+
+        $mine = $game->pac(Pac::MINE, 0);
+        $game->processPac(0, Pac::ENEMY, 4, 0, Pac::stronger($mine->type()), 0, 0);
+
+        $box = new Box($game, [
+            CloseEnemyStrategy::class,
+        ]);
+        $box->exec();
+
+        self::assertInstanceOf(MoveOrder::class, $mine->order());
+    }
+
+    public function testSkipIfCooldown()
+    {
+        $game = GameMaker::factory(['#@ #']);
+
+        $mine = $game->pac(Pac::MINE, 0);
+
+        $game->turn();
+        $game->processPac(0, Pac::MINE, 1, 0, $mine->type(), 0, 10);
+        $game->processPac(0, Pac::ENEMY, 2, 0, $mine->type(), 0, 0);
+
+        $box = new Box($game, [
+            CloseEnemyStrategy::class,
+        ]);
+        $box->exec();
+
+        self::assertNull($mine->order());
     }
 }

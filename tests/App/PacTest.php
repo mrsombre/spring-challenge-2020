@@ -6,15 +6,18 @@ namespace Test\App;
 use App\NoopOrder;
 use App\Pac;
 use App\Point;
+use App\CompositeKeyHelper;
 
 class PacTest extends \PHPUnit\Framework\TestCase
 {
     public function testBasic()
     {
         $point = new Point(2, 3);
-        $pac = new Pac(1, Pac::MINE, 1, $point, Pac::TYPE_ROCK, 2, 3);
+        $pac = new Pac(2, Pac::MINE, 1, $point, Pac::TYPE_ROCK, 2, 3);
 
-        self::assertSame(1, $pac->id());
+        self::assertSame(2, $pac->id());
+        self::assertSame(CompositeKeyHelper::ak(1, 2), $pac->ak());
+        self::assertSame(CompositeKeyHelper::ck(1, 2), $pac->ck());
         self::assertTrue($pac->isMine());
         self::assertFalse($pac->isEnemy());
         self::assertSame($point, $pac->pos());

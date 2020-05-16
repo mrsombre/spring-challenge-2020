@@ -18,28 +18,27 @@ class TickTest extends \PHPUnit\Framework\TestCase
         self::assertSame(1, $tick->id());
     }
 
-    public function testVisiblePac()
+    public function testPac()
     {
         $tick = new Tick(1);
+        $pac = new Pac(1, 1, $tick->id(), new Point(0, 0), Pac::TYPE_ROCK, 2, 3);
 
-        $pac = new Pac(1, 1, 1, new Point(0, 0), Pac::TYPE_ROCK, 2, 3);
-        $tick->appendPac($pac);
-        self::assertSame($pac, $tick->visiblePac(1, 1));
+        $tick->observePac($pac);
         self::assertTrue($tick->isPacVisible(1, 1));
-        $pac = new Pac(1, 0, 1, new Point(0, 0), Pac::TYPE_ROCK, 2, 3);
-        $tick->appendPac($pac);
-        self::assertCount(2, $tick->visiblePacs());
-        self::assertCount(1, $tick->visiblePacs(Pac::MINE));
+        self::assertSame($pac, $tick->visiblePac(1, 1));
+        self::assertInstanceOf(\ArrayObject::class, $tick->visiblePacs());
+        self::assertCount(1, $tick->visiblePacs());
     }
 
-    public function testVisiblePellet()
+    public function testPellet()
     {
         $tick = new Tick(1);
         $pellet = new Pellet(new Tile(0, 0, Tile::TYPE_FLOOR), 1);
 
-        $tick->appendPellet($pellet);
-        self::assertSame($pellet, $tick->visiblePellet($pellet));
+        $tick->observePellet($pellet);
         self::assertTrue($tick->isPelletVisible($pellet));
+        self::assertSame($pellet, $tick->visiblePellet($pellet));
+        self::assertInstanceOf(\ArrayObject::class, $tick->visiblePellets());
         self::assertCount(1, $tick->visiblePellets());
     }
 }
