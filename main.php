@@ -175,6 +175,22 @@ class Point implements CompositeKey
         $ny = $this->y + Point::DISPLACEMENT[$direction][1];
         return new Point($nx, $ny);
     }
+
+    public function opposite(Point $point): int
+    {
+        $direction = $this->direction($point);
+        switch ($direction) {
+            case self::LEFT:
+                return self::RIGHT;
+            case self::RIGHT:
+                return self::LEFT;
+            case self::TOP:
+                return self::BOTTOM;
+            case self::BOTTOM:
+                return self::TOP;
+        }
+        throw new InvalidArgumentException("No opposite side for {$direction}");
+    }
 }
 
 class Tile extends Point
@@ -612,11 +628,21 @@ class Field
     public function lines(Point $point): array
     {
         $result = [];
-        foreach (Point::DIRECTIONS as $direction) {
+        foreach ($this->adjacent($point) as $direction => $adjacent) {
             $v = $this->vector($point, $direction);
             if ($v->count()) {
                 $result[$direction] = $v;
             }
+        }
+        return $result;
+    }
+
+    public function paths(Point $point): array
+    {
+        $lines = $this->lines($point);
+        $result = [];
+        foreach ($lines as $direction => $line) {
+            $result[$direction] = clone $line;
         }
         return $result;
     }
@@ -932,6 +958,8 @@ class Radar
     /** @var \App\Pellet[] */
     private $supers;
 
+    public $supersFiltered = false;
+
     public function __construct(Game $game)
     {
         $this->game = $game;
@@ -1212,14 +1240,21 @@ class CloseEnemyStrategy extends AbstractStrategy
                 }
                 // run?
                 $paths = $this->game->field()->lines($mine->pos());
-                $enemyPos = $mine->pos()->direction($enemy->pos());
-                unset($paths[$enemyPos]);
+                $enemyDirection = $mine->pos()->direction($enemy->pos());
+                unset($paths[$enemyDirection]);
 
                 if (count($paths)) {
+                    $opposite = $mine->pos()->opposite($enemy->pos());
                     /** @var \App\Vector $path */
-                    $path = array_pop($paths);
-                    debug("Pac {$mine->id()} is weaker than {$enemy->id()}, decided to run!");
-                    return new MoveOrder($path->top());
+                    if (isset($paths[$opposite])) {
+                        $path = $paths[$opposite];
+                    } else {
+                        $path = $paths[array_rand($paths)];
+                    }
+                    $runTo = $path->top();
+
+                    debug("Pac {$mine->id()} is weaker than {$enemy->id()}, decided to run {$runTo->ck()}!");
+                    return new MoveOrder($runTo);
                 }
             }
         }
@@ -1261,18 +1296,9 @@ class CloseEnemyStrategy extends AbstractStrategy
         /** @var \App\Pac $enemy */
         foreach ($threats as $enemy) {
             $cmp = $mine->compare($enemy);
-            if ($cmp < 1) {
-                // run?
-                $paths = $this->game->field()->lines($mine->pos());
-                $enemyPos = $mine->pos()->direction($enemy->pos());
-                unset($paths[$enemyPos]);
-
-                if (count($paths)) {
-                    /** @var \App\Vector $path */
-                    $path = array_pop($paths);
-                    debug("Pac {$mine->id()} is weaker than {$enemy->id()}, decided to run!");
-                    return new MoveOrder($path->top());
-                }
+            if ($cmp === -1 && !$mine->isPower()) {
+                // wait?
+                return new NoopOrder;
             }
         }
 
@@ -1291,12 +1317,19 @@ class CloseEnemyStrategy extends AbstractStrategy
 
 class RushSupersStrategy extends AbstractStrategy
 {
+    private static $initialized = false;
+
     public function exec()
     {
         $supers = $this->game->radar()->supers();
         $supersCount = $supers->count();
         if (!$supersCount) {
             return;
+        }
+
+        $assignMax = $supersCount;
+        if (!$this->game->radar()->supersFiltered) {
+            $assignMax = ceil($supersCount / 2);
         }
 
         $pairs = [];
@@ -1323,6 +1356,20 @@ class RushSupersStrategy extends AbstractStrategy
             if ($assignedPacs->count() === $pacsCount || $assignedPellets->count() === $supersCount) {
                 break;
             }
+            // no assign enemy supers
+            if ($assignedPellets->count() >= $assignMax) {
+                break;
+            }
+        }
+
+        // consider enemy eaten
+        if (!$this->game->radar()->supersFiltered) {
+            foreach ($supers as $pellet) {
+                if (!$assignedPellets->contains($pellet)) {
+                    $pellet->eaten();
+                }
+            }
+            $this->game->radar()->supersFiltered = true;
         }
 
         foreach ($this->pacs as $pac) {
@@ -1359,7 +1406,7 @@ class PriorityVectorStrategy extends AbstractStrategy
 
     private function react(Pac $mine): ?AbstractOrder
     {
-        $paths = $this->game->field()->lines($mine->pos());
+        $paths = $this->game->field()->paths($mine->pos());
         if (!count($paths)) {
             return null;
         }
@@ -1371,37 +1418,49 @@ class PriorityVectorStrategy extends AbstractStrategy
         arsort($priority);
 
         $best = key($priority);
-        if ($priority[$best] < 1) {
+        /** @var \App\Vector $vector */
+        $vector = $paths[$best];
+        // check min
+        $min = $vector->count();
+        if ($priority[$best] <= -$min) {
             return null;
         }
 
-        /** @var \App\Vector $vector */
-        $vector = $paths[$best];
-        $point = $vector->top();
+        $vector->setIteratorMode(SplDoublyLinkedList::IT_MODE_LIFO);
+        /** @var \App\Tile $tile */
+        foreach ($vector as $tile) {
+            if ($this->game->isPelletKnown($tile)) {
+                $pellet = $this->game->pellet($tile);
+                if (!$pellet->isExists()) {
+                    continue;
+                }
+                break;
+            }
+        }
+        if (!isset($tile)) {
+            return null;
+        }
 
-        debug("Pac {$mine->id()} choosen vector to {$point->ck()} with score {$priority[$best]}");
-
-        return new MoveOrder($point);
+        debug("Pac {$mine->id()} choosen vector to {$tile->ck()} with score {$priority[$best]}");
+        return new MoveOrder($tile);
     }
 
-    private function priority(int $direction, SplDoublyLinkedList $vector): int
+    private function priority(int $direction, SplDoublyLinkedList $vector): float
     {
         $weight = 0;
         $steps = $vector->count();
+        $distanceFactor = $steps;
         /** @var Point $point */
         foreach ($vector as $point) {
             if ($this->game->isPelletKnown($point)) {
                 $pellet = $this->game->pellet($point);
                 if ($pellet->isExists()) {
-                    $weight += $pellet->isSuper() ? 10 : 1;
-                } else {
-                    $weight += -1 * $steps;
+                    $cost = $pellet->isSuper() ? 10 : 1;
+                    $weight += $cost + ($distanceFactor / $steps);
                 }
             }
-            $adjacent = $this->game->field()->adjacent($point);
-            if (count($adjacent) > 2) {
-                break;
-            }
+            $weight -= 1;
+            $distanceFactor--;
         }
         return $weight;
     }

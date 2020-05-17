@@ -4,8 +4,6 @@ declare(strict_types=1);
 namespace Test\Strategy;
 
 use App\CloseEnemyStrategy;
-use App\Field;
-use App\Game;
 use App\Box;
 use App\MoveOrder;
 use App\Pac;
@@ -15,7 +13,7 @@ use Test\GameMaker;
 
 class CloseEnemyStrategyTest extends \PHPUnit\Framework\TestCase
 {
-    public function testWaitIfStronger()
+    public function testWaitIfStrongerAndEnemyHasPower()
     {
         $game = GameMaker::factory(['#@ #']);
 
@@ -30,7 +28,7 @@ class CloseEnemyStrategyTest extends \PHPUnit\Framework\TestCase
         self::assertInstanceOf(NoopOrder::class, $mine->order());
     }
 
-    public function testAttackIfStronger()
+    public function testAttackIfStrongerAndEnemyHasNoPower()
     {
         $game = GameMaker::factory(['#@ #']);
 
@@ -80,10 +78,16 @@ class CloseEnemyStrategyTest extends \PHPUnit\Framework\TestCase
 
     public function testRunIfWeaker()
     {
-        $game = GameMaker::factory(['# @  #']);
-
+        $game = GameMaker::factory([
+            '#   #',
+            '# @ #',
+            '#   #',
+        ]);
         $mine = $game->pac(Pac::MINE, 0);
-        $game->processPac(0, Pac::ENEMY, 4, 0, Pac::stronger($mine->type()), 0, 0);
+
+        $game->turn();
+        $game->processPac(0, Pac::MINE, 2, 1, Pac::TYPE_ROCK, 0, 10);
+        $game->processPac(0, Pac::ENEMY, 2, 2, Pac::stronger($mine->type()), 0, 10);
 
         $box = new Box($game, [
             CloseEnemyStrategy::class,
@@ -91,6 +95,7 @@ class CloseEnemyStrategyTest extends \PHPUnit\Framework\TestCase
         $box->exec();
 
         self::assertInstanceOf(MoveOrder::class, $mine->order());
+        self::assertSame('MOVE {id} 2 0', $mine->order()->command());
     }
 
     public function testSkipIfCooldown()

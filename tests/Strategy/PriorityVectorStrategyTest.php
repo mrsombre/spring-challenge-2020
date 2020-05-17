@@ -44,4 +44,20 @@ class PriorityVectorStrategyTest extends \PHPUnit\Framework\TestCase
         self::assertInstanceOf(MoveOrder::class, $pac->order());
         self::assertSame('5.1', $pac->order()->pos()->ck());
     }
+
+    public function testChooseNearest()
+    {
+        $game = GameMaker::factory([
+            '#. @. #',
+        ]);
+
+        $box = new Box($game, [
+            PriorityVectorStrategy::class,
+        ]);
+        $box->exec();
+
+        $pac = $game->pac(Pac::MINE, 0);
+        self::assertInstanceOf(MoveOrder::class, $pac->order());
+        self::assertSame('4.0', $pac->order()->pos()->ck());
+    }
 }

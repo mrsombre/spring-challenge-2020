@@ -27,4 +27,22 @@ class RushSupersStrategyTest extends \PHPUnit\Framework\TestCase
         self::assertInstanceOf(MoveOrder::class, $pac->order());
         self::assertSame('1.1', $pac->order()->pos()->ck());
     }
+
+    public function testAssignOnlyHalf()
+    {
+        $game = GameMaker::factory([
+            '@...',
+            '@**.',
+        ]);
+
+        $box = new Box($game, [
+            RushSupersStrategy::class,
+        ]);
+        $box->exec();
+
+        $pac = $game->pac(Pac::MINE, 0);
+        self::assertNull($pac->order());
+
+        self::assertTrue($game->pellet($game->field()->tile(2,1))->isEaten());
+    }
 }
