@@ -41,3 +41,12 @@ Strategies:
 - speed
 
 League beaten: Bronze
+
+### Ver 5
+
+Strategies:
+- basic path finding and optimal path simulation
+
+WARNING: A lot of ugly code included xD
+
+Finished contest in Silver league
