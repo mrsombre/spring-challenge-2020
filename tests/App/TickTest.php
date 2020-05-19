@@ -27,6 +27,7 @@ class TickTest extends \PHPUnit\Framework\TestCase
         self::assertTrue($tick->isPacVisible(1, 1));
         self::assertSame($pac, $tick->visiblePac(1, 1));
         self::assertInstanceOf(\ArrayObject::class, $tick->visiblePacs());
+        self::assertSame($pac, $tick->visiblePacInPoint(new Point(0, 0)));
         self::assertCount(1, $tick->visiblePacs());
     }
 
