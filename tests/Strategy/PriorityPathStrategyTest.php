@@ -3,7 +3,6 @@ declare(strict_types=1);
 
 namespace Test\Strategy;
 
-use App\NoopOrder;
 use Test\GameMaker;
 use App\PriorityPathStrategy;
 use App\Box;
@@ -37,8 +36,6 @@ class PriorityPathStrategyTest extends \PHPUnit\Framework\TestCase
         ]);
 
         $pac = $game->pac(Pac::MINE, 0);
-        $pac->cooldown = 10;
-        $pac->speedActive = 5;
 
         $box = new Box($game, [
             PriorityPathStrategy::class,
@@ -46,7 +43,7 @@ class PriorityPathStrategyTest extends \PHPUnit\Framework\TestCase
         $box->exec();
 
         self::assertInstanceOf(MoveOrder::class, $pac->order());
-        self::assertSame('4.1', $pac->order()->pos()->ck());
+        self::assertSame('3.1', $pac->order()->pos()->ck());
     }
 
     public function testChooseNearest()
@@ -68,10 +65,11 @@ class PriorityPathStrategyTest extends \PHPUnit\Framework\TestCase
     public function testNotEnterDeadEnd()
     {
         $game = GameMaker::factory([
-            '#  @. #',
+            '#  @  .#',
         ]);
 
         $pac = $game->pac(Pac::MINE, 0);
+
         $game->turn();
         $game->processPac(0, Pac::MINE, 3, 0, Pac::TYPE_ROCK, 5, 0);
 
@@ -81,7 +79,7 @@ class PriorityPathStrategyTest extends \PHPUnit\Framework\TestCase
         $box->exec();
 
         self::assertInstanceOf(MoveOrder::class, $pac->order());
-        self::assertSame('4.0', $pac->order()->pos()->ck());
+        self::assertSame('5.0', $pac->order()->pos()->ck());
     }
 
     public function testDontChooseOccupied()
@@ -106,8 +104,8 @@ class PriorityPathStrategyTest extends \PHPUnit\Framework\TestCase
             '##@##',
             '##*##',
             '##.##',
-            '##@.#',
-            '# . #',
+            '## .#',
+            '# .@#',
         ]);
 
         $box = new Box($game, [
@@ -119,7 +117,7 @@ class PriorityPathStrategyTest extends \PHPUnit\Framework\TestCase
         $pac1 = $game->pac(Pac::MINE, 1);
         self::assertInstanceOf(MoveOrder::class, $pac0->order());
         self::assertSame('2.1', $pac0->order()->pos()->ck());
-        self::assertSame('2.4', $pac1->order()->pos()->ck());
+        self::assertSame('3.3', $pac1->order()->pos()->ck());
     }
 
     public function testDontEnterOccupiedStrongWithEnemy()
@@ -166,30 +164,6 @@ class PriorityPathStrategyTest extends \PHPUnit\Framework\TestCase
         $box->exec();
 
         self::assertInstanceOf(MoveOrder::class, $pac0->order());
-        self::assertSame('2.2', $pac0->order()->pos()->ck());
-    }
-
-    public function testStack()
-    {
-        $game = GameMaker::factory([
-            '# @.#',
-        ]);
-
-        $pac0 = $game->pac(Pac::MINE, 0);
-        $game->turn();
-        $game->processPac(0, Pac::MINE, 2, 0, $pac0->type(), 5, 10);
-
-        $box = new Box($game, [
-            PriorityPathStrategy::class,
-        ]);
-        $box->exec();
-
-        $game->turn();
-        $game->processPac(0, Pac::MINE, 2, 0, $pac0->type(), 5, 10);
-
-        $box = new Box($game, [
-            PriorityPathStrategy::class,
-        ]);
-        $box->exec();
+        self::assertSame('3.0', $pac0->order()->pos()->ck());
     }
 }

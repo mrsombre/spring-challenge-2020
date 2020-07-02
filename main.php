@@ -24,6 +24,7 @@ class Helper
 {
     /**
      * Recursive iterator
+     *
      * @param iterable $it
      * @return \Generator
      */
@@ -387,22 +388,20 @@ class Pac implements PositionAware, CompositeKey
 
     private $id;
     private $owner;
-    public $speedActive = 0;
-    public $cooldown = 0;
-    public $type;
-    public $typeBefore;
+    private $speedActive = 0;
+    private $cooldown = 0;
+    private $type;
+    private $typeBefore;
     /** @var \App\Point */
-    public $pos;
+    private $pos;
     /** @var \App\Point */
-    public $posBefore;
-    public $seen = 0;
-    public $seenBefore = 0;
-
+    private $posBefore;
+    private $seen = 0;
+    private $seenBefore = 0;
     /** @var \App\AbstractOrder */
-    public $order;
+    private $order;
     /** @var \App\AbstractOrder */
-    public $orderBefore;
-
+    private $orderBefore;
     private $ak;
     private $ck;
 
@@ -462,6 +461,11 @@ class Pac implements PositionAware, CompositeKey
     public function pos(): Point
     {
         return $this->pos;
+    }
+
+    public function posBefore(): ?Point
+    {
+        return $this->posBefore;
     }
 
     public function moveDirection(): int
@@ -528,6 +532,14 @@ class Pac implements PositionAware, CompositeKey
     public function order(): ?AbstractOrder
     {
         return $this->order;
+    }
+
+    /**
+     * @return \App\MoveOrder|\App\SwithOrder|\App\SpeedOrder|null
+     */
+    public function orderBefore(): ?AbstractOrder
+    {
+        return $this->orderBefore;
     }
 
     public static function stronger(string $type): string
@@ -813,31 +825,28 @@ class Game
     private $pacs;
     /** @var \App\Pellet[] */
     private $pellets;
-
-    public $longSuper = false;
+    /** @var \App\Pellet[] */
+    private $supers;
+    /** @var \SplObjectStorage */
+    private $pacsToSupers;
 
     public function __construct(Field $field)
     {
         $this->field = $field;
         $this->pellets = new ArrayObject;
+        $this->supers = new ArrayObject;
         foreach ($field->tiles() as $tile) {
             if ($tile->isFloor()) {
                 $this->pellets[$tile->ck()] = new Pellet($tile, 1);
             }
         }
         $this->pacs = new ArrayObject;
-        $this->radar = new Radar($this);
         $this->finder = new PathFinder($this);
     }
 
     public function field(): Field
     {
         return $this->field;
-    }
-
-    public function radar(): Radar
-    {
-        return $this->radar;
     }
 
     public function finder(): PathFinder
@@ -855,11 +864,64 @@ class Game
         $this->tick = new Tick($this->ticks);
     }
 
-    public function update($visiblePacs = [], $visiblePellets = [])
+    public function findSupers(array $raw)
     {
-        $this->processPacs($visiblePacs);
-        $this->processPellets($visiblePellets);
-        $this->radar->update();
+        foreach ($raw as $data) {
+            [$x, $y, $cost] = sscanf($data, '%d %d %d');
+            if ($cost > 1) {
+                $tile = $this->field->tile($x, $y);
+                $this->supers[$tile->ck()] = $this->pellets[$tile->ck()] = new Pellet($tile, $cost);
+            }
+        }
+
+        $pairs = [];
+        /** @var Pellet $pellet */
+        foreach ($this->supers as $pellet) {
+            /** @var Pac $pac */
+            foreach ($this->pacs as $pac) {
+                $pairs[$pac->pos()->distance($pellet)][] = ['pac' => $pac, 'pellet' => $pellet];
+            }
+        }
+        ksort($pairs);
+
+        $assignedPacs = new SplObjectStorage;
+        $assignedPellets = new SplObjectStorage;
+        $pacsCount = count($this->pacs);
+        $supersCount = count($this->supers);
+        foreach ($pairs as $solutions) {
+            foreach ($solutions as $pair) {
+                if ($assignedPacs->contains($pair['pac']) || $assignedPellets->contains($pair['pellet'])) {
+                    continue;
+                }
+                $assignedPacs->offsetSet($pair['pac'], $pair['pellet']);
+                $assignedPellets->attach($pair['pellet']);
+
+                // no assign enemy supers
+                // find opposite
+                [$x, $y] = $pair['pellet']->ak();
+                $x = $this->field->width() - $x - 1;
+                $pellet = $this->pellet($this->field->tile($x, $y));
+                $assignedPellets->attach($pellet);
+            }
+            if ($assignedPacs->count() === $pacsCount || $assignedPellets->count() === $supersCount) {
+                break;
+            }
+        }
+
+        $this->pacsToSupers = $assignedPacs;
+    }
+
+    /**
+     * @return \App\Pellet[]
+     */
+    public function supers(): \ArrayObject
+    {
+        return $this->supers;
+    }
+
+    public function pacsToSupers(): \SplObjectStorage
+    {
+        return $this->pacsToSupers;
     }
 
     public function tick(): Tick
@@ -936,6 +998,44 @@ class Game
     {
         foreach ($raw as $data) {
             $this->processPellet(...sscanf($data, '%d %d %d'));
+        }
+
+        $this->cleanupPelletsIDontSee();
+        $this->cleanupPelletsUnderPacs();
+    }
+
+    /**
+     * delete invisible pellets in pacs visible range
+     */
+    public function cleanupPelletsIDontSee()
+    {
+        foreach ($this->tick->visiblePacs() as $pac) {
+            if (!$pac->isMine()) {
+                continue;
+            }
+
+            $paths = $this->field->lines($pac->pos());
+            foreach (Helper::flatten($paths) as $point) {
+                if (!$this->isPelletKnown($point)) {
+                    continue;
+                }
+                if (!$this->tick->isPelletVisible($point)) {
+                    $this->pellet($point)->eaten();
+                }
+            }
+        }
+    }
+
+    /**
+     * clean all where i see pacs first
+     */
+    public function cleanupPelletsUnderPacs()
+    {
+        foreach ($this->tick->visiblePacs() as $pac) {
+            if (!$this->isPelletKnown($pac->pos())) {
+                continue;
+            }
+            $this->pellet($pac->pos())->eaten();
         }
     }
 
@@ -1026,17 +1126,17 @@ class Tick
         return $this->visiblePacs[$ck];
     }
 
+    public function visiblePacInPoint(Point $point): ?Pac
+    {
+        return $this->visiblePacsByPoint[$point->ck()] ?? null;
+    }
+
     /**
      * @return \App\Pac[]
      */
     public function visiblePacs(): ArrayObject
     {
         return $this->visiblePacs;
-    }
-
-    public function visiblePacInPoint(Point $point): ?Pac
-    {
-        return $this->visiblePacsByPoint[$point->ck()] ?? null;
     }
 
     public function observePellet(Point $pellet): Tick
@@ -1066,142 +1166,6 @@ class Tick
     public function visiblePellets(): ArrayObject
     {
         return $this->visiblePellets;
-    }
-}
-
-class Radar
-{
-    /** @var Game */
-    private $game;
-
-    /** @var \App\Pellet[] */
-    private $pellets;
-    /** @var \App\Pellet[] */
-    private $supers;
-
-    public $supersFiltered = false;
-
-    public function __construct(Game $game)
-    {
-        $this->game = $game;
-        $this->pellets = $game->pellets();
-        $this->supers = new ArrayObject;
-    }
-
-    /**
-     * observe and update game info
-     */
-    public function update()
-    {
-        $this->attachPellets();
-        $this->cleanupPelletsUnderPacs();
-        $this->cleanupPelletsIDontSee();
-        $this->detachPellets();
-    }
-
-    public function attachPellets()
-    {
-        foreach ($this->game->tick()->visiblePellets() as $pellet) {
-            $ck = $pellet->ck();
-            if ($pellet->isSuper() && !isset($this->supers[$ck])) {
-                $this->supers[$ck] = $pellet;
-            }
-        }
-    }
-
-    public function detachPellets()
-    {
-        $delete = [];
-        foreach ($this->pellets as $pellet) {
-            if ($pellet->isEaten()) {
-                $delete[] = $pellet;
-            }
-        }
-        /** @var \App\Pellet $pellet */
-        foreach ($delete as $pellet) {
-            if (isset($this->pellets[$pellet->ck()])) {
-                $this->pellets->offsetUnset($pellet->ck());
-            }
-            if (isset($this->supers[$pellet->ck()])) {
-                $this->supers->offsetUnset($pellet->ck());
-            }
-        }
-    }
-
-    /**
-     * @return \App\Pellet[]
-     */
-    public function pellets(): ArrayObject
-    {
-        return $this->pellets;
-    }
-
-    /**
-     * @return \App\Pellet[]
-     */
-    public function supers(): ArrayObject
-    {
-        return $this->supers;
-    }
-
-    /**
-     * clean all where i see pacs first
-     */
-    public function cleanupPelletsUnderPacs()
-    {
-        foreach ($this->game->tick()->visiblePacs() as $pac) {
-            if (!$this->game->isPelletKnown($pac->pos())) {
-                continue;
-            }
-            $this->game->pellet($pac->pos())->eaten();
-        }
-    }
-
-    /**
-     * delete invisible pellets in pacs visible range
-     */
-    public function cleanupPelletsIDontSee()
-    {
-        foreach ($this->game->tick()->visiblePacs() as $pac) {
-            if (!$pac->isMine()) {
-                continue;
-            }
-            $paths = $this->game->field()->lines($pac->pos());
-            foreach (Helper::flatten($paths) as $point) {
-                if (!$this->game->isPelletKnown($point)) {
-                    continue;
-                }
-                if (!$this->game->tick()->isPelletVisible($point)) {
-                    $this->game->pellet($point)->eaten();
-                }
-            }
-        }
-    }
-
-    /**
-     * @param \App\Point $center
-     * @return \App\Pellet[]
-     */
-    public function closestPellets(Point $center): ArrayObject
-    {
-        $pellets = new ArrayObject;
-        $distance = 1;
-        while (true) {
-            $points = $this->game->field()->edges($center, $distance);
-            foreach ($points as $point) {
-                if (isset($this->pellets[$point->ck()])) {
-                    $pellets[$point->ck()] = $this->pellets[$point->ck()];
-                }
-            }
-            if (count($pellets)) {
-                return $pellets;
-            }
-            $distance++;
-            if ($distance > ($this->game->field()->width() - 2) && $distance > ($this->game->field()->height() - 2)) {
-                break;
-            }
-        }
-        return $pellets;
     }
 }
 
@@ -1394,7 +1358,7 @@ class CloseEnemyStrategy extends AbstractStrategy
 
             // weaker
             $cmp = $mine->compare($enemy);
-            if ($cmp < 1 && $mine->isPower()) {
+            if ($cmp < 1 && $mine->isPower() && $distance <= 3) {
                 debug("Pac {$mine->id()} is weaker than {$enemy->id()}, decided to switch");
                 return new SwithOrder(Pac::stronger($enemy->type()));
             }
@@ -1425,72 +1389,27 @@ class RushSupersStrategy extends AbstractStrategy
 {
     public function exec()
     {
-        $supers = $this->game->radar()->supers();
+        $supers = $this->game->supers();
         $supersCount = $supers->count();
         if (!$supersCount) {
             return;
         }
 
         /** @var \App\Pac $pac */
+        $pacsToSupers = $this->game->pacsToSupers();
         foreach ($this->pacs as $pac) {
-            $order = $pac->order();
-            if ($order instanceof RushSuper) {
-                if ($order->pos() instanceof Pellet and $order->pos()->isEaten()) {
-                    $pac->assignOrder(null);
-                } else {
+            if ($pacsToSupers->offsetExists($pac)) {
+                /** @var \App\Pellet $pellet */
+                $pellet = $pacsToSupers->offsetGet($pac);
+                if ($pellet->isEaten()) {
+                    $pacsToSupers->detach($pac);
+                    continue;
+                }
+
+                if ($order = $this->react($pac, $pellet)) {
                     $this->assign($pac, $order);
-                }
-                $this->game->longSuper = true;
-            }
-        }
-        if ($this->game->longSuper) {
-            return;
-        }
-
-        $pairs = [];
-        /** @var Pellet $pellet */
-        foreach ($supers as $pellet) {
-            /** @var Pac $pac */
-            foreach ($this->pacs as $pac) {
-                $pairs[$pac->pos()->distance($pellet)][] = [$pac, $pellet];
-            }
-        }
-        ksort($pairs);
-
-        $assignedPacs = new SplObjectStorage;
-        $assignedPellets = new SplObjectStorage;
-        $pacsCount = count($this->pacs);
-        foreach ($pairs as $solutions) {
-            foreach ($solutions as $pair) {
-                if ($pair[1]->isEaten()) {
                     continue;
                 }
-                if ($assignedPacs->contains($pair[0]) || $assignedPellets->contains($pair[1])) {
-                    continue;
-                }
-                $assignedPacs->offsetSet($pair[0], $pair[1]);
-                $assignedPellets->attach($pair[1]);
-
-                // no assign enemy supers
-                // find opposite
-                [$x, $y] = $pair[1]->ak();
-
-                $x = $this->game->field()->width() - $x - 1;
-                $pellet = $this->game->pellet($this->field->tile($x, $y));
-                $pellet->eaten();
-            }
-            if ($assignedPacs->count() === $pacsCount || $assignedPellets->count() === $supersCount) {
-                break;
-            }
-        }
-
-        foreach ($this->pacs as $pac) {
-            if (!$assignedPacs->contains($pac)) {
-                continue;
-            }
-            if ($order = $this->react($pac, $assignedPacs->offsetGet($pac))) {
-                $this->assign($pac, $order);
-                continue;
             }
         }
     }
@@ -1521,9 +1440,8 @@ class PriorityPathStrategy extends AbstractStrategy
     {
         /** @var Pac $pac */
         foreach ($this->pacs as $pac) {
-            if ($pac->order instanceof PathOrder) {
-                $pac->orderBefore = $pac->order;
-                $pac->order = null;
+            if ($pac->order() instanceof PathOrder) {
+                $pac->assignOrder(null);
             }
             if ($order = $this->react($pac)) {
                 $this->assign($pac, $order);
@@ -1545,21 +1463,8 @@ class PriorityPathStrategy extends AbstractStrategy
             $simulatedPath->pac = $mine;
             $simulatedPath->firstPath = $path;
 
-            $invalidMove = null;
-            if ($mine->posBefore !== null && $mine->posBefore === $mine->pos && $mine->orderBefore instanceof MoveOrder) {
-                $invalidMove = $mine->orderBefore->pos();
-            }
-
             try {
                 $this->priority($path, $simulatedPath);
-                if ($invalidMove && isset($simulatedPath->visited[$invalidMove->ck()])) {
-                    foreach ($this->pacs as $pac) {
-                        if ($pac->order instanceof WaitOrder) {
-                            continue;
-                        }
-                    }
-                    return new WaitOrder;
-                }
                 $pathsHeap->insert($simulatedPath);
             } catch (InvalidPathException $e) {
             }
@@ -1617,8 +1522,21 @@ class PriorityPathStrategy extends AbstractStrategy
         $simulated->deep++;
         $paths = $this->finder->paths($end);
 
+        // remove prev
+        if ($path->count() === 1) {
+            $prev = $simulated->pac->pos();
+        } else {
+            $prev = $path->offsetGet($path->count() - 2);
+        }
+
+        $from = $end->direction($prev);
+        unset($paths[$from]);
+
         $pathsHeap = new PriorityPathHeap;
         foreach ($paths as $direction => $path) {
+            if (isset($simulated->visited[$path->bottom()->ck()])) {
+                continue;
+            }
             $simulatedPath = clone $simulated;
             try {
                 $this->priority($path, $simulatedPath);
@@ -1638,36 +1556,20 @@ class PriorityPathStrategy extends AbstractStrategy
 
     public function cost(Path $path, SimulatedPath $simulated): float
     {
-        $score = -$path->count();
-        if ($path->isDeadEnd()) {
-            $score *= 1.5;
-        }
+        $score = 0;
 
-        $prev = 1;
-        $c = 0.1;
         /** @var \App\Pellet $point */
         foreach ($path as $point) {
-            if (isset($simulated->visited[$point->ck()])) {
-                throw new InvalidPathException;
-            }
-
             $simulated->steps++;
+
             // pack in path
             if ($pac = $this->game->tick()->visiblePacInPoint($point)) {
                 if ($pac->isMine()) {
-                    if ($pac->order instanceof PathOrder && $simulated->pac->pos()->isSame($pac->order->path->firstPath->top())) {
-                        //debug("Visible pac at {$pac->pos()->ck()} is mine, skip occupied path");
-                        throw new InvalidPathException;
-                    }
+                    //debug("Visible pac at {$pac->pos()->ck()} is mine, skip occupied path");
+                    throw new InvalidPathException;
                 } else {
                     if ($simulated->pac->compare($pac) < 1) {
                         throw new InvalidPathException;
-                    }
-
-                    // attack
-                    if ($pac->compare($simulated->pac) === -1 && $path->isDeadEnd()) {
-                        $score += 10;
-                        $simulated->attack = true;
                     }
                 }
             }
@@ -1681,63 +1583,21 @@ class PriorityPathStrategy extends AbstractStrategy
                 $simulated->pellets++;
                 $pellet = $this->game->pellet($point);
                 if ($pellet->isExists()) {
-                    $score += $pellet->cost();
-                    if ($prev !== null) {
-                        $c += 0.1;
-                        $score += $c;
-                    }
-                    $prev = 1;
-                } else {
-                    $c = 0;
-                    $prev = null;
+                    $cost = 1;
+                    $score += ($cost / $simulated->steps);
                 }
             }
+
             $simulated->visited[$point->ck()] = $point->ck();
         }
+
         $simulated->score += $score;
 
+        if ($path->isDeadEnd()) {
+            $simulated->steps += $path->count();
+        }
+
         return $score;
-    }
-}
-
-class ClosestPelletStrategy extends AbstractStrategy
-{
-    public function exec()
-    {
-        /** @var Pac $pac */
-        foreach ($this->pacs as $pac) {
-            if ($order = $this->react($pac)) {
-                $this->assign($pac, $order);
-                continue;
-            }
-        }
-    }
-
-    private function react(Pac $pac): ?AbstractOrder
-    {
-        $closest = $this->closest($pac);
-        return new MoveOrder($closest);
-    }
-
-    private function closest(Pac $pac): ?Point
-    {
-        $closest = $this->game->radar()->closestPellets($pac->pos());
-        if (count($closest) === 1) {
-            $pellet = $closest->getIterator()->current();
-            debug("Pac {$pac->id()} move to closest pellet {$pellet->ck()}");
-            return $pellet;
-        }
-
-        [$x, $y] = $pac->pos()->ak();
-
-        $side = $x < ($this->game->field()->width() / 2) ? Point::LEFT : Point::RIGHT;
-        foreach ($closest as $pellet) {
-            if ($pac->pos()->horizontalDirection($pellet) === $side) {
-                return $pellet;
-            }
-        }
-
-        return $closest->getIterator()->current();
     }
 }
 
@@ -1801,6 +1661,7 @@ class Box
     private $pacs;
     /** @var AbstractStrategy[] */
     private $strategies;
+    private $game;
 
     public function __construct(Game $game, array $strategies = null)
     {
@@ -1818,7 +1679,6 @@ class Box
                 SpeedStrategy::class,
                 RushSupersStrategy::class,
                 PriorityPathStrategy::class,
-                ClosestPelletStrategy::class,
                 NoopStrategy::class,
             ];
         }
@@ -1856,61 +1716,85 @@ class Box
     }
 }
 
+class Reader
+{
+    /**
+     * Parsing game field
+     */
+    public static function readField(): array
+    {
+        [$w, $h] = fscanf(STDIN, "%d %d");
+        $raw = [];
+        for ($i = 0; $i < $h; $i++) {
+            $raw[$i] = stream_get_line(STDIN, $w + 1, "\n");
+        }
+        return $raw;
+    }
+
+    public static function readScore(): array
+    {
+        return fscanf(STDIN, "%d %d");
+    }
+
+    public static function readInfo(): array
+    {
+        fscanf(STDIN, "%d", $count);
+        $lines = [];
+        for ($i = 0; $i < $count; $i++) {
+            $lines[] = stream_get_line(STDIN, 64, "\n");
+        }
+        return $lines;
+    }
+}
+
+/**
+ * Game processing
+ */
 // @codeCoverageIgnoreStart
 if (defined('APP_TEST')) {
     return;
 }
 
-/**
- * Parsing game field
- */
-$w = $h = 0;
-fscanf(STDIN, "%d %d", $w, $h);
-$raw = [];
-for ($i = 0; $i < $h; $i++) {
-    $raw[] = stream_get_line(STDIN, $w + 1, "\n");
-}
-$field = Field::factory($raw);
-unset($w, $h, $raw);
-
-/**
- * Init input variables
- */
-$visiblePacCount = 0;
-$visiblePelletCount = 0;
-
-/**
- * Start game loop
- */
+// first turn
+$field = Field::factory(Reader::readField());
 $game = new Game($field);
 
-while (true) {
-    $t = microtime(true);
+$score = Reader::readScore();
+$game->turn(...$score);
 
-    $score = fscanf(STDIN, "%d %d");
+$pacs = Reader::readInfo();
+$game->processPacs($pacs);
+$pellets = Reader::readInfo();
+$game->processPellets($pellets);
+
+$game->findSupers($pellets);
+$box = new Box($game);
+$box->exec();
+
+$commands = $game->commands();
+echo implode(' | ', $commands) . "\n";
+
+// Game loop
+while (true) {
+    $score = Reader::readScore();
     $game->turn(...$score);
 
-    fscanf(STDIN, "%d", $visiblePacCount);
-    $visiblePacs = [];
-    for ($i = 0; $i < $visiblePacCount; $i++) {
-        $visiblePacs[] = stream_get_line(STDIN, 64, "\n");
-    }
+    $pacs = Reader::readInfo();
+    $pellets = Reader::readInfo();
 
-    fscanf(STDIN, "%d", $visiblePelletCount);
-    $visiblePellets = [];
-    for ($i = 0; $i < $visiblePelletCount; $i++) {
-        $visiblePellets[] = stream_get_line(STDIN, 64, "\n");
-    }
+    $t = microtime(true);
 
-    $game->update($visiblePacs, $visiblePellets);
+    $game->processPacs($pacs);
+    $game->processPellets($pellets);
 
     $box = new Box($game);
     $box->exec();
 
     $commands = $game->commands();
-    echo implode(' | ', $commands) . "\n";
 
     $tt = number_format(microtime(true) - $t, 5);
-    debug("Tick time {$tt}");
+    debug("turn time: {$tt}");
+
+    echo implode(' | ', $commands) . "\n";
 }
 // @codeCoverageIgnoreEnd

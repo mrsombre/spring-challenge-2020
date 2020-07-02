@@ -16,6 +16,8 @@ class GameMaker
         $game->turn(0, 0);
 
         $pacId = 0;
+
+        $supers = [];
         foreach ($map as $y => $line) {
             for ($x = 0; $x < strlen($line); $x++) {
                 if ($line[$x] === '@') {
@@ -24,7 +26,7 @@ class GameMaker
                     continue;
                 }
                 if ($line[$x] === '*') {
-                    $game->processPellet($x, $y, 10);
+                    $supers[] = "{$x} {$y} 10";
                 }
                 if ($line[$x] === '.') {
                     $game->processPellet($x, $y, 1);
@@ -34,7 +36,7 @@ class GameMaker
                 }
             }
         }
-        $game->update();
+        $game->findSupers($supers);
 
         return $game;
     }

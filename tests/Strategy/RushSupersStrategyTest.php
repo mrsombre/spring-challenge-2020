@@ -14,8 +14,8 @@ class RushSupersStrategyTest extends \PHPUnit\Framework\TestCase
     public function testMoveToSuper()
     {
         $game = GameMaker::factory([
-            '@.',
-            '.*',
+            '@.  ',
+            '.** ',
         ]);
 
         $box = new Box($game, [
@@ -42,7 +42,5 @@ class RushSupersStrategyTest extends \PHPUnit\Framework\TestCase
 
         $pac = $game->pac(Pac::MINE, 0);
         self::assertNull($pac->order());
-
-        self::assertTrue($game->pellet($game->field()->tile(2,1))->isEaten());
     }
 }
